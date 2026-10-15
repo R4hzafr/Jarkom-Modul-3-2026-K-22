@@ -6,3 +6,8 @@ run di tengen (kalo gabisa dhcpnya):
 
 test di fushiguro:
 ./test-soal16.sh
+
+[KALO dhcp nya mati]
+./alter_tengen.sh
+./alter_jichi.sh
+./no10-client.sh pool1

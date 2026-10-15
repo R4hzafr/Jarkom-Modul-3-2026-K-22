@@ -1,3 +1,4 @@
+apt install -y python3
 jalanin dulu
 ./setup-soal17-gojo.sh
 ./setup-soal17-geto.sh
@@ -7,19 +8,12 @@ di nanami sama todo:
 ./setup-soal17-api.sh
 
 testing di klien fushiguro
-
+./test-soal17-client.sh
 
 terus cek di yaga
-mysql -u root -p
+mysql -u root
 USE db_shibuya_K22;
 
-SELECT
-    id,
-    source_ip,
-    client_ip,
-    request_path,
-    method,
-    created_at
-FROM request_logs
+SELECT * FROM request_logs
 ORDER BY id DESC
 LIMIT 20;

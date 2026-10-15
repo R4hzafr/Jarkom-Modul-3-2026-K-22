@@ -1,45 +1,22 @@
 ##Siapkan Apache Benchmark di Kusakabe
 
 Jalankan di terminal Kusakabe:
-apt update
-apt install -y apache2-utils curl dnsutils
-
-Cek domain dan koneksi ke Gojo:
-getent hosts jujutsu.K22.com
-curl -I http://jujutsu.K22.com/
-curl -i http://jujutsu.K22.com/api
-
-bikin script testing
-
-##Jalann baseline dulu
-
-Di Gojo, simpan backup konfigurasi terlebih dahulu:
-cp /etc/nginx/sites-available/soal16-public-gateway \
-   /root/soal16-public-gateway.soal20-backup
+apk update
+apk add apache2-utils curl bind-tools
 
 
-tampilin bagian API yang sedang aktif:
-grep -n -A25 -B2 'location.*api' \
-  /etc/nginx/sites-available/soal16-public-gateway
-
-Kita perlu menghapus sementara hanya directive `limit_req` dan `limit_req_status` pada dua lokasi API, kemudian menjalankan:
-nginx -t && nginx -s reload
-
-Setelah itu, jalankan benchmark baseline di Kusakabe:
-./test-soal20.sh
-
-Simpan outputnya sebelum mengaktifkan kembali rate limiting.
-
-##Aktifin rate limiting dan lakukan benchmark ulang
-
-Di Gojo, pulihkan konfigurasi rate limiting pada kedua lokasi API:
-limit_req zone=api_limit burst=10 nodelay;
-limit_req_status 429;
-
-Kemudian validasi dan reload:
-nginx -t && nginx -s reload
-
-Di Kusakabe, jalankan kembali:
-./test-soal20.sh
-
-simpen terus badningn sama yg seblumnya
+nano /etc/nginx/sites-available/soal16-public-gateway
+kasih comment(#) di limit_req untuk pengujian baseline terlebih dahulu, kalo yg pas pengecekan setelah dipasang rate limitingnya, tinggal 
+diilangin lagi aja commentnya 
+-baseline
+./test20
+cp -r /root/soal20-results /root/soal20-baseline
+grep -E \
+'Complete requests:|Failed requests:|Requests per second:|Time per request:|Non-2xx responses:' \
+/root/soal20-baseline/*.txt
+-rate limiting
+./test20
+cp -r /root/soal20-results /root/soal20-rate-limit
+grep -E \
+'Complete requests:|Failed requests:|Requests per second:|Time per request:|Non-2xx responses:' \
+/root/soal20-rate-limit/*.txt
