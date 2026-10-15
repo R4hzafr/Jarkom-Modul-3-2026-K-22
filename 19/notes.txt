@@ -1,0 +1,6 @@
+jalanin di gojo
+./setup-soal19-gojo.sh
+
+test di fushigoro
+./test-soal19-cache.sh 
+./test-soal19-rate.sh

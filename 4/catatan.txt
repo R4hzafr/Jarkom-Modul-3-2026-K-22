@@ -1,0 +1,85 @@
+script di tengen:
+
+nano /root/dhcp-net2.sh
+
+
+#!/bin/bash
+PREFIX="192.222"
+MAC_ITADORI="02:42:d5:d6:14:00"
+MAC_FUSHIGURO="02:42:ad:10:64:00"
+MAC_ZENIN="02:42:af:0b:23:00"
+MAC_OKKOTSU="02:42:e3:7b:65:00"
+
+echo "nameserver 192.168.122.1" > /etc/resolv.conf
+dpkg -s isc-dhcp-server >/dev/null 2>&1 || { apt-get update && apt-get install -y isc-dhcp-server; }
+
+# tengen mendengarkan di interface Network 4
+sed -i 's/^INTERFACESv4=.*/INTERFACESv4="eth0"/' /etc/default/isc-dhcp-server
+
+# Network 4: subnet lokal tanpa pool (kalau belum ada)
+grep -q "subnet ${PREFIX}.4.0" /etc/dhcp/dhcpd.conf || cat >> /etc/dhcp/dhcpd.conf <<EOF
+
+subnet ${PREFIX}.4.0 netmask 255.255.255.0 {
+}
+EOF
+
+# Network 2: class MAC + 2 pool
+cat > /etc/dhcp/net2.conf <<EOF
+class "pool1" {
+    match if substring(hardware, 1, 6) = ${MAC_ITADORI}
+          or substring(hardware, 1, 6) = ${MAC_FUSHIGURO};
+}
+class "pool2" {
+    match if substring(hardware, 1, 6) = ${MAC_ZENIN}
+          or substring(hardware, 1, 6) = ${MAC_OKKOTSU};
+}
+
+subnet ${PREFIX}.2.0 netmask 255.255.255.0 {
+    option routers ${PREFIX}.2.1;
+    option broadcast-address ${PREFIX}.2.255;
+    option domain-name-servers ${PREFIX}.1.2, ${PREFIX}.1.3;
+
+    pool {
+        allow members of "pool1";
+        range ${PREFIX}.2.10 ${PREFIX}.2.35;
+    }
+    pool {
+        allow members of "pool2";
+        range ${PREFIX}.2.70 ${PREFIX}.2.95;
+    }
+}
+EOF
+
+grep -q 'net2.conf' /etc/dhcp/dhcpd.conf || echo 'include "/etc/dhcp/net2.conf";' >> /etc/dhcp/dhcpd.conf
+
+# validasi, lalu (re)start
+dhcpd -t -cf /etc/dhcp/dhcpd.conf || exit 1
+touch /var/lib/dhcp/dhcpd.leases
+pkill dhcpd 2>/dev/null; sleep 1
+service isc-dhcp-server restart || dhcpd -4 -q -cf /etc/dhcp/dhcpd.conf eth0
+ps aux | grep [d]hcpd
+SCRIPT
+
+jalanin
+
+bash /root/dhcp-net2.sh
+
+
+script di jichi 
+
+nano /root/relay.sh
+
+
+#!/bin/bash
+echo "nameserver 192.168.122.1" > /etc/resolv.conf
+dpkg -s isc-dhcp-relay >/dev/null 2>&1 || { apt-get update && apt-get install -y isc-dhcp-relay; }
+
+pkill dhcrelay 2>/dev/null; sleep 1
+dhcrelay -4 -i eth2 -i eth3 -i eth4 192.222.4.10
+ps aux | grep [d]hcrelay
+SCRIPT
+
+
+jalanin
+
+bash /root/relay.sh

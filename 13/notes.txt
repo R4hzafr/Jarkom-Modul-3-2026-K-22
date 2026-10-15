@@ -1,0 +1,49 @@
+yaga: ./setup-mariadb-master-13.sh
+mariadb-dump --databases db_shibuya_K22 > /root/db_shibuya_K22.sql
+tf:
+inu
+apt-get install -y netcat-openbsd
+nc -l -p 9000 > /root/db_shibuya_K22.sql
+yaga
+nc 192.222.4.4 9000 < /root/db_shibuya_K22.sql
+
+mariadb < /root/db_shibuya_K22.sql(GAPERLUDENG)
+
+lanjut ke inumaki: ./setup-mariadb-slave-13.sh [LOG POS sama MASTER_LOG_FILE DISESUAIN BOS]
+
+testing 
+
+######################
+installing mariadb inumaki:
+apt-get install mariadb-server 
+apt-get install mariadb-client
+service mariadb start
+
+restart inumaki:
+cat > /etc/mysql/mariadb.conf.d/60-slave.cnf <<'EOF'
+[mysqld]
+server-id=2
+bind-address=0.0.0.0
+relay-log=/var/log/mysql/mariadb-relay-bin
+log_bin=/var/log/mysql/mariadb-bin
+binlog_format=ROW
+gtid_strict_mode=ON
+read_only=ON
+EOF
+
+di root inumaki:
+STOP SLAVE;
+RESET SLAVE ALL;
+
+CHANGE MASTER TO
+  MASTER_HOST='192.222.4.3',
+  MASTER_PORT=3306,
+  MASTER_USER='replicator',
+  MASTER_PASSWORD='Repl_K22_2026!',
+  MASTER_LOG_FILE='mariadb-bin.000001',
+  MASTER_LOG_POS=1913;
+
+START SLAVE;
+SHOW SLAVE STATUS\G
+######################
+

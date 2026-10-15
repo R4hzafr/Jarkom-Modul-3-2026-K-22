@@ -1,0 +1,68 @@
+#API WORKER
+jalankan di nanami, todo, kirara:
+./setup-api-worker-14.sh
+curl -i http://127.0.0.1:8080/
+cek si yaga:
+mysql -u root -p db_shibuya_K22
+    SELECT id, source_ip, request_path, method, status_code, created_at
+    FROM request_logs
+    ORDER BY id DESC
+    LIMIT 10;
+
+#trafiklewatgeto
+./setup-geto-api-14.sh
+test:
+for i in $(seq 1 9); do
+    echo "Request $i:"
+    curl -sS http://127.0.0.1/
+    echo
+done
+
+#di ketiga API worker lagi:
+./secure-api-worker-14.sh 
+test di geto (berhasil):
+for ip in 192.222.4.8 192.222.4.9 192.222.4.10; do
+    echo "=== $ip via Geto ==="
+    curl -sS --max-time 3 "http://$ip:8080/"
+    echo
+done
+  curl -i -H 'Host: api.jujutsu.K22.com' http://127.0.0.1/(OPS)
+test di selain geto(harusnya gagal):
+curl -v --connect-timeout 3 http://192.222.4.8:8080/
+curl -v --connect-timeout 3 http://192.222.4.9:8080/
+curl -v --connect-timeout 3 http://192.222.4.10:8080/
+
+
+#nginx+php di panda sama maki:
+./setup-web-worker-14.sh
+testing:
+curl -i http://127.0.0.1/
+ss -lntp | grep ':80'
+securing di maki dan panda
+./secure-web-worker-14.sh
+test dari gojo (harusnya berhasil):
+curl -i --max-time 5 http://192.222.4.6/
+curl -i --max-time 5 http://192.222.4.7/
+
+  curl -i -H 'Host: jujutsu.K22.com' http://192.222.4.6/(OPS)
+  curl -i -H 'Host: www.jujutsu.K22.com' http://192.222.4.7/(OPS)
+
+selain itu gagal:
+curl -v --connect-timeout 3 http://192.222.4.6/
+curl -v --connect-timeout 3 http://192.222.4.7/
+
+
+nano /etc/nginx/sites-available/web-worker(OPS)
+server_name jujutsu.K22.com www.jujutsu.K22.com;(OPS)
+nginx -t && nginx -s reload(OPS)
+
+#reverse proxy
+di gojo: ./setup-soal14-web-proxy.sh
+testing di gojo(berhasil):
+for i in $(seq 1 12); do
+    curl -s -H 'Host: jujutsu.K22.com' http://127.0.0.1/ \
+      | grep -oP 'Hostname: \K[^<]+'
+di client lain:
+curl --connect-timeout 3 -i http://192.222.4.6/
+curl --connect-timeout 3 -i http://192.222.4.7/
+curl -i -H 'Host: jujutsu.K22.com' http://192.222.1.4/(200)

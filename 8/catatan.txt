@@ -1,0 +1,76 @@
+script di tengen 
+nano /root/no8-capture.sh
+
+#!/bin/sh
+
+# NOMOR 8 - DHCP PACKET CAPTURE
+# Kelompok K22
+# Node: tengen
+
+INTERFACE="eth0"
+
+if ! command -v tcpdump >/dev/null 2>&1; then
+    apt-get install -y tcpdump || exit 1
+fi
+
+case "$1" in
+    net2)
+        FILE="/root/no8-net2.pcap"
+        ;;
+    net3)
+        FILE="/root/no8-net3.pcap"
+        ;;
+    baca2)
+        tcpdump -n -vvv -r /root/no8-net2.pcap
+        exit
+        ;;
+    baca3)
+        tcpdump -n -vvv -r /root/no8-net3.pcap
+        exit
+        ;;
+    *)
+        echo "Cara menggunakan:"
+        echo "sh /root/no8-capture.sh net2"
+        echo "sh /root/no8-capture.sh net3"
+        echo "sh /root/no8-capture.sh baca2"
+        echo "sh /root/no8-capture.sh baca3"
+        exit 1
+        ;;
+esac
+
+echo "================================"
+echo " NOMOR 8 - DHCP PACKET CAPTURE"
+echo " Kelompok K22"
+echo "================================"
+echo "Interface : $INTERFACE"
+echo "File      : $FILE"
+echo ""
+echo "Menunggu paket DHCP..."
+echo "Jalankan udhcpc pada client."
+echo "Tekan CTRL+C untuk berhenti."
+echo ""
+
+tcpdump -i "$INTERFACE" -n -s 0 -U \
+-w "$FILE" \
+'udp port 67 or udp port 68'
+
+beri izin 
+chmod +x /root/no8-capture.sh
+Kebutuhan	Perintah di tengen
+Capture Network 2	sh /root/no8-capture.sh net2
+Capture Network 3	sh /root/no8-capture.sh net3
+Baca hasil Network 2	sh /root/no8-capture.sh baca2
+Baca hasil Network 3	sh /root/no8-capture.sh baca3
+
+
+Di tengen:
+sh /root/no8-capture.sh net2
+
+
+Biarkan berjalan. Buka Console itadori, kemudian jalankan:
+ip addr flush dev eth0
+
+
+udhcpc -i eth0 -n -q
+
+

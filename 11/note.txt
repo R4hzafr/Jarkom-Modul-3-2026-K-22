@@ -1,0 +1,13 @@
+jalankan di utahime (master):
+./setup-dns-master_11.sh
+jalankan di shoko(slave):
+./setup-dns-slave_11.sh
+
+testing
+di utahime:
+sed -i 's/2026101401/2026101402/' /etc/bind/db.jujutsu.K22.com
+named-checkzone jujutsu.K22.com /etc/bind/db.jujutsu.K22.com
+kill -HUP "$(pgrep -xo named)"
+
+testing di kedua(utahime+shoko):
+dig @192.222.1.2 jujutsu.K22.com SOA +short

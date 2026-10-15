@@ -1,0 +1,185 @@
+PANDUAN LENGKAP NOMOR 9 - UJI GANGGUAN DAN PEMULIHAN DHCP RELAY
+Kelompok: K22 | GNS3 Docker
+
+TUJUAN
+1. DHCP Relay di jichi dimatikan: client itadori gagal meminta lease DHCP baru.
+2. DHCP Relay di jichi dihidupkan kembali: itadori memperoleh IP sesuai Pool 1 Network 2 dan gateway yang benar.
+
+NODE DAN FILE
+- jichi (Debian): /root/no9-relay.sh -> stop/start/status relay
+- itadori (Alpine): /root/no9-test.sh -> kosongkan IP dan uji DHCP
+- tengen (Debian): server DHCP; tidak perlu membuat script baru untuk No. 9.
+
+PERSIAPAN KALAU NODE BARU DI-STOP/START
+(LEWATI jika jaringan dan DHCP saat ini sudah berfungsi.)
+A. Console jichi:
+   bash /root/setup-router.sh
+   ip addr replace 192.168.122.103/24 dev eth0
+   ip route replace default via 192.168.122.1 dev eth0
+B. Console tengen:
+   bash /root/tengen-net.sh
+   apt-get install -y isc-dhcp-server
+   bash /root/dhcp-net2.sh
+   bash /root/dhcp-net3.sh
+   PENTING: pastikan MAC_INO di /root/dhcp-net3.sh sudah diperbaiki menjadi 02:42:74:4d:20:00.
+C. Console jichi:
+   apt-get install -y isc-dhcp-relay
+   bash /root/relay.sh
+D. Periksa: tengen melayani DHCP dan jichi menjalankan dhcrelay sebelum uji gangguan.
+Catatan: urutan pemulihan dapat disesuaikan jika jaringan/paket sudah aktif. Paket dan /etc bisa hilang setelah node stop/start, sedangkan /root bertahan sesuai kondisi lab.
+
+BAGIAN 1 - MEMBUAT SCRIPT JICHI
+Lokasi: Console node jichi (DEBIAN)
+1. Buka editor:
+   nano /root/no9-relay.sh
+2. Tempel SELURUH isi ini (tanpa penanda garis):
+
+#!/bin/bash
+# Nomor 9 - Gangguan dan pemulihan DHCP Relay
+# Node: jichi | Kelompok K22
+
+case "$1" in
+  stop)
+    echo '=== MEMATIKAN DHCP RELAY ==='
+    service isc-dhcp-relay stop 2>/dev/null || true
+    pkill -x dhcrelay 2>/dev/null || true
+    sleep 1
+    if pgrep -x dhcrelay >/dev/null; then
+      echo 'GAGAL: DHCP Relay masih berjalan'
+      exit 1
+    fi
+    echo 'BERHASIL: DHCP Relay berhenti'
+    ;;
+  start)
+    echo '=== MENGAKTIFKAN DHCP RELAY ==='
+    pkill -x dhcrelay 2>/dev/null || true
+    bash /root/relay.sh
+    sleep 1
+    if pgrep -x dhcrelay >/dev/null; then
+      echo 'BERHASIL: DHCP Relay aktif'
+    else
+      echo 'GAGAL: DHCP Relay belum aktif'
+      exit 1
+    fi
+    ;;
+  status)
+    echo '=== STATUS DHCP RELAY ==='
+    if pgrep -a -x dhcrelay; then
+      echo 'DHCP Relay AKTIF'
+    else
+      echo 'DHCP Relay MATI'
+    fi
+    ;;
+  *)
+    echo 'Cara menggunakan:'
+    echo 'bash /root/no9-relay.sh stop'
+    echo 'bash /root/no9-relay.sh status'
+    echo 'bash /root/no9-relay.sh start'
+    exit 1
+    ;;
+esac
+
+3. Simpan nano: Ctrl+O, Enter, Ctrl+X.
+4. Beri izin (jichi):
+   chmod +x /root/no9-relay.sh
+5. Cek sintaks (jichi):
+   bash -n /root/no9-relay.sh
+6. Cek status awal (jichi):
+   bash /root/no9-relay.sh status
+
+BAGIAN 2 - MEMBUAT SCRIPT ITADORI
+Lokasi: Console node itadori (ALPINE: gunakan sh, bukan bash)
+1. Pastikan nano tersedia. Bila perintah nano tidak ditemukan:
+   apk add nano
+2. Buka editor:
+   nano /root/no9-test.sh
+3. Tempel SELURUH isi script berikut:
+
+#!/bin/sh
+# Nomor 9 - Uji DHCP Client
+# Node: itadori | Kelompok K22
+
+echo '================================'
+echo ' NOMOR 9 - DHCP CLIENT TEST'
+echo '================================'
+echo 'Menghapus IP lama pada eth0...'
+ip addr flush dev eth0
+
+# Mencegah rute default lama terbaca sebagai hasil uji baru.
+ip route del default dev eth0 2>/dev/null || true
+
+echo 'Meminta lease DHCP baru...'
+udhcpc -i eth0 -n -q -t 3 -T 2
+RESULT=$?
+
+echo '================================'
+echo ' HASIL PENGUJIAN DHCP'
+echo '================================'
+if [ "$RESULT" -eq 0 ]; then
+    echo 'BERHASIL: Client mendapatkan lease DHCP'
+else
+    echo 'GAGAL: Client tidak mendapatkan lease DHCP'
+fi
+
+echo 'Alamat IPv4:'
+ip -4 addr show eth0
+
+echo 'Routing:'
+ip route
+exit "$RESULT"
+
+4. Simpan nano: Ctrl+O, Enter, Ctrl+X.
+5. Beri izin (itadori):
+   chmod +x /root/no9-test.sh
+6. Cek sintaks (itadori):
+   sh -n /root/no9-test.sh
+
+BAGIAN 3 - URUTAN PENGUJIAN NOMOR 9
+Pastikan sebelum dimulai relay dan DHCP server AKTIF.
+
+A. UJI RELAY MATI
+   1. Console jichi:
+      bash /root/no9-relay.sh stop
+   2. Console jichi:
+      bash /root/no9-relay.sh status
+      Harus tertulis DHCP Relay MATI; pastikan tidak ada proses dhcrelay.
+   3. Console itadori:
+      sh /root/no9-test.sh
+      Harapan: "udhcpc: no lease, failing" / gagal mendapatkan DHCP lease.
+   4. Screenshot status relay mati (jichi) dan kegagalan DHCP (itadori).
+
+B. UJI RELAY HIDUP KEMBALI
+   5. Console jichi:
+      bash /root/no9-relay.sh start
+   6. Console jichi:
+      bash /root/no9-relay.sh status
+      Harus tertulis DHCP Relay AKTIF.
+   7. Console itadori:
+      sh /root/no9-test.sh
+      Harapan: IP 192.222.2.10–192.222.2.35 dari server 192.222.4.10.
+   8. Console itadori (verifikasi tambahan):
+      ip -4 addr show eth0
+      ip route
+      Harapan: default via 192.222.2.1 (gateway Network 2).
+   9. Screenshot relay hidup lagi (jichi), keberhasilan lease & routing (itadori).
+
+BAGIAN 4 - PERINTAH SINGKAT SAAT DEMO
+(JICHI)    bash /root/no9-relay.sh stop
+(JICHI)    bash /root/no9-relay.sh status
+(ITADORI)  sh /root/no9-test.sh
+(JICHI)    bash /root/no9-relay.sh start
+(JICHI)    bash /root/no9-relay.sh status
+(ITADORI)  sh /root/no9-test.sh
+(ITADORI)  ip -4 addr show eth0
+(ITADORI)  ip route
+
+CATATAN PENTING
+- Nama node dalam tanda kurung hanya petunjuk; JANGAN ketik '(JICHI)' atau '(ITADORI)' di terminal.
+- Jangan jalankan script uji client ketika jalur relay perlu dipertahankan untuk pekerjaan lain; script menghapus IP eth0 terlebih dahulu.
+- Script yang sudah ada di /root boleh ditimpa dengan versi ini; tidak perlu membuat dua versi menggunakan vi dan nano.
+- Script 'start' memakai /root/relay.sh yang sudah dimiliki jichi (harus masih valid dan relay harus mendengarkan eth2, eth3, eth4).
+- Untuk pengujian kegagalan yang valid, harus tidak ada relay lain atau jalur DHCP lain yang menjawab client.
+- Bila DHCP tetap berhasil saat relay mati, periksa apakah proses dhcrelay lain masih hidup atau ada jalur DHCP alternatif.
+- Saat DHCP gagal, exit code nonzero pada script uji adalah hasil yang diharapkan, bukan kerusakan script.
+- Setelah demo, selalu hidupkan relay lagi agar jaringan normal.
+- Script tersimpan di /root. Tetapi autostart setelah restart belum dicapai oleh Nomor 9; itu pengujian berbeda (Nomor 10).

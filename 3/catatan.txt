@@ -1,0 +1,39 @@
+scriptnya
+
+nano /root/setup-relay.sh
+
+#!/bin/bash
+echo "1. Membuat direktori DHCP..."
+mkdir -p /etc/dhcp
+
+echo "2. Menulis konfigurasi dhcpd.conf..."
+cat << 'EOF' > /etc/dhcp/dhcpd.conf
+subnet 192.222.3.0 netmask 255.255.255.0 {
+    option routers 192.222.3.1;
+    option domain-name-servers 8.8.8.8;
+
+    pool {
+        range 192.222.3.10 192.222.3.50;
+        default-lease-time 600;
+        max-lease-time 1200;
+    }
+
+    host kugisaki {
+        hardware ethernet 02:42:c3:c7:5a:99;
+        fixed-address 192.222.3.99;
+    }
+}
+EOF
+
+echo "3. Merestart service DHCP..."
+service isc-dhcp-server restart
+echo "Selesai!"
+
+
+jalanin di jichi
+
+chmod +x /root/dhcp-net3.sh
+bash /root/setup-relay.sh
+
+
+script 

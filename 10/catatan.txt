@@ -1,0 +1,322 @@
+PANDUAN FINAL NOMOR 10 — AUTOSTART DHCP SERVER & DHCP RELAY
+Praktikum GNS3 | Kelompok K22 | Prefix 192.222 | Oktober 2026
+=================================================================
+
+STATUS PENGUJIAN YANG SUDAH DILAKUKAN
+- tengen setelah stop/start: proses dhcpd terdeteksi di eth0.
+- jichi setelah stop/start: proses dhcrelay terdeteksi dengan eth2, eth3, eth4,
+  dan tujuan 192.222.4.10.
+- itadori dan fushiguro berhasil setelah restart; pengguna kemudian mengonfirmasi
+  semua 8 client berhasil diuji, termasuk kugisaki.
+- Pemeriksaan oleh script client memastikan IP berada dalam pool dan gateway
+  sesuai. Kesesuaian waktu lease 1800/43200 detik, DNS, dan keberlanjutan
+  reservasi fixed perlu didokumentasikan secara khusus jika diminta penguji.
+
+TOPOLOGI YANG DIPAKAI
+jichi  : Debian, router/relay, WAN eth0=192.168.122.103/24,
+         gateway WAN 192.168.122.1; eth1-eth4 = 192.222.1.1 ... 192.222.4.1
+         DHCP relay -> 192.222.4.10
+
+tengen : Debian, DHCP server, eth0=192.222.4.10/24, gateway 192.222.4.1
+client : Alpine; jalankan script dengan sh (bukan bash)
+
+PENTING
+- Semua script disimpan di /root pada NODE MASING-MASING.
+- Setiap container Docker punya filesystem berbeda; script client dibuat
+  di kedelapan node Alpine masing-masing.
+- Di image debinet, /etc/debinet-init.sh memanggil /root/init.sh saat start
+  HANYA apabila init.sh ada DAN executable.
+- Pada lab ini file /root bertahan setelah node stop/start, sedangkan paket dan
+  /etc mungkin perlu dipulihkan; sebab itu pemulihan dilakukan oleh script.
+- Jangan hapus/mengganti /etc/debinet-init.sh.
+- Bagian di bawah mencatat konfigurasi yang telah digunakan pada pengujian.
+
+=================================================================
+A. SCRIPT PEMULIHAN JICHI (NODE: jichi / Debian)
+=================================================================
+
+Buat/edit dengan:
+  nano /root/no10-jichi.sh
+
+Isi:
+#!/bin/bash
+# NOMOR 10 - PEMULIHAN ROUTER & DHCP RELAY, K22
+set -e
+
+echo '=== NOMOR 10 / JICHI ==='
+echo '[1] Router, interface internal, forwarding, NAT'
+bash /root/setup-router.sh
+
+echo '[2] WAN dan default route'
+ip addr replace 192.168.122.103/24 dev eth0
+ip route replace default via 192.168.122.1 dev eth0
+
+echo '[3] IPv4 forwarding'
+sysctl -w net.ipv4.ip_forward=1
+
+echo '[4] Paket DHCP Relay'
+if ! command -v dhcrelay >/dev/null 2>&1; then
+    apt-get install -y isc-dhcp-relay
+fi
+
+echo '[5] Jalankan DHCP Relay'
+pkill -x dhcrelay 2>/dev/null || true
+bash /root/relay.sh
+sleep 2
+
+echo '=== VERIFIKASI JICHI ==='
+ip -4 addr show
+ip route
+sysctl net.ipv4.ip_forward
+iptables -t nat -S POSTROUTING
+if pgrep -a -x dhcrelay; then
+    echo 'BERHASIL: DHCP Relay aktif'
+else
+    echo 'GAGAL: DHCP Relay tidak aktif'
+    exit 1
+fi
+
+Simpan nano: Ctrl+O, Enter, Ctrl+X.
+Izin:
+  chmod +x /root/no10-jichi.sh
+Uji MANUAL (hanya ketika dibutuhkan):
+  bash /root/no10-jichi.sh
+
+Catatan: Script ini memanggil /root/setup-router.sh dan /root/relay.sh
+(yang sudah disiapkan sebelumnya). JANGAN menjalankan versi relay lama yang
+hanya mendengarkan eth2/eth3. Relay harus mendengarkan eth2, eth3, eth4.
+
+=================================================================
+B. SCRIPT PEMULIHAN TENGEN (NODE: tengen / Debian)
+=================================================================
+
+Buat/edit dengan:
+  nano /root/no10-tengen.sh
+
+Isi:
+#!/bin/bash
+# NOMOR 10 - PEMULIHAN DHCP SERVER, K22
+set -e
+
+echo '=== NOMOR 10 / TENGEN ==='
+echo '[1] Konfigurasi jaringan'
+bash /root/tengen-net.sh
+
+echo '[2] Paket DHCP Server'
+if ! command -v dhcpd >/dev/null 2>&1; then
+    apt-get install -y isc-dhcp-server
+fi
+
+echo '[3] Network 2'
+bash /root/dhcp-net2.sh
+
+echo '[4] Network 3'
+bash /root/dhcp-net3.sh
+
+echo '[5] Validasi DHCP'
+dhcpd -t -cf /etc/dhcp/dhcpd.conf
+
+echo '[6] Pastikan daemon aktif'
+if ! pgrep -x dhcpd >/dev/null; then
+    service isc-dhcp-server start
+fi
+sleep 2
+
+echo '=== VERIFIKASI TENGEN ==='
+ip -4 addr show eth0
+ip route
+if pgrep -a -x dhcpd; then
+    echo 'BERHASIL: DHCP Server aktif'
+else
+    echo 'GAGAL: DHCP Server tidak aktif'
+    exit 1
+fi
+echo 'MAC ino dalam script:'
+grep MAC_INO /root/dhcp-net3.sh
+
+Simpan nano: Ctrl+O, Enter, Ctrl+X.
+Izin:
+  chmod +x /root/no10-tengen.sh
+Uji MANUAL (hanya ketika dibutuhkan):
+  bash /root/no10-tengen.sh
+
+Penting: pastikan /root/dhcp-net3.sh memakai MAC ino yang sudah diperbaiki:
+  MAC_INO="02:42:74:4d:20:00"
+Catatan: pesan 'Host declarations are global' adalah WARNING, bukan error.
+
+=================================================================
+C. AUTOSTART (NODE: jichi, lalu tengen / Debian)
+=================================================================
+
+Kenapa: isi /etc/debinet-init.sh mengeksekusi /root/init.sh apabila file
+tersebut ada dan executable:
+  [ -f /root/init.sh ] && [ -x /root/init.sh ] && /root/init.sh
+
+C1. DI JICHI
+  nano /root/init.sh
+
+Isi:
+#!/bin/sh
+# AUTOSTART JICHI, K22
+bash /root/no10-jichi.sh > /root/no10-jichi-startup.log 2>&1 &
+
+Simpan: Ctrl+O, Enter, Ctrl+X.
+  chmod +x /root/init.sh
+
+C2. DI TENGEN
+  nano /root/init.sh
+
+Isi:
+#!/bin/sh
+# AUTOSTART TENGEN, K22
+bash /root/no10-tengen.sh > /root/no10-tengen-startup.log 2>&1 &
+
+Simpan: Ctrl+O, Enter, Ctrl+X.
+  chmod +x /root/init.sh
+
+Autostart ini berjalan di background. Paket masih perlu waktu terpasang,
+dan urutan startup antara jichi-tengen tidak dijamin. Tunggu service siap
+sebelum menguji DHCP client.
+
+=================================================================
+D. SCRIPT UJI DHCP (MASING-MASING NODE CLIENT ALPINE)
+=================================================================
+
+Buat sekali pada SETIAP client di bawah:
+  nano /root/no10-client.sh
+
+Isi:
+#!/bin/sh
+# NOMOR 10 - UJI DHCP CLIENT, K22
+POLICY="$1"
+case "$POLICY" in
+  pool1) NETWORK=2; MIN=10; MAX=35 ;;
+  pool2) NETWORK=2; MIN=70; MAX=95 ;;
+  short) NETWORK=3; MIN=10; MAX=89 ;;
+  long)  NETWORK=3; MIN=100; MAX=199 ;;
+  fixed) NETWORK=3; MIN=99; MAX=99 ;;
+  *) echo 'Gunakan: pool1, pool2, short, long, fixed'; exit 1 ;;
+esac
+
+echo '=== NOMOR 10 / UJI CLIENT K22 ==='
+echo 'Menghapus IP lama...'
+ip addr flush dev eth0
+ip route del default dev eth0 2>/dev/null || true
+
+echo 'Meminta DHCP...'
+udhcpc -i eth0 -n -q -t 3 -T 2
+if [ "$?" -ne 0 ]; then
+  echo 'GAGAL: Tidak mendapat IP DHCP'
+  exit 1
+fi
+
+IP=$(ip -4 -o addr show dev eth0 | awk '{print $4}' | cut -d/ -f1 | head -n 1)
+GW=$(ip route | awk '$1=="default" {print $3; exit}')
+LAST=${IP##*.}
+echo "IP: $IP"
+echo "Gateway: $GW"
+echo 'DNS / domain:'
+cat /etc/resolv.conf
+case "$IP" in
+  192.222.$NETWORK.*) ;;
+  *) echo 'GAGAL: Network tidak sesuai'; exit 1 ;;
+esac
+if [ "$LAST" -lt "$MIN" ] || [ "$LAST" -gt "$MAX" ]; then
+  echo 'GAGAL: IP di luar pool'
+  exit 1
+fi
+if [ "$GW" != "192.222.$NETWORK.1" ]; then
+  echo 'GAGAL: Gateway salah'
+  exit 1
+fi
+echo 'BERHASIL: IP dan Gateway sesuai'
+
+Simpan nano: Ctrl+O, Enter, Ctrl+X.
+Izin pada tiap client:
+  chmod +x /root/no10-client.sh
+
+CARA MENJALANKAN DI MASING-MASING CONSOLE:
+  itadori   : sh /root/no10-client.sh pool1
+  fushiguro : sh /root/no10-client.sh pool1
+  zenin     : sh /root/no10-client.sh pool2
+  okkotsu   : sh /root/no10-client.sh pool2
+  ino       : sh /root/no10-client.sh short
+  kusakabe  : sh /root/no10-client.sh short
+  miwa      : sh /root/no10-client.sh long
+  kugisaki  : sh /root/no10-client.sh fixed
+
+Script di atas MEMERIKSA IP dan gateway, serta MENAMPILKAN resolv.conf.
+Script BELUM otomatis membandingkan lease time atau isi DNS dengan target.
+Gunakan output udhcpc dan dhcpd.leases untuk bukti tambahan.
+
+=================================================================
+E. URUTAN DEMO NOMOR 10 SETELAH SEMUA SCRIPT TERSEDIA
+=================================================================
+
+1. Di GNS3: Stop kemudian Start jichi dan tengen.
+2. JANGAN jalankan script manual. Tunggu proses startup selesai.
+3. Di jichi:
+     ps aux | grep '[d]hcrelay'
+     tail -30 /root/no10-jichi-startup.log
+     ip -4 addr show
+     ip route
+     sysctl net.ipv4.ip_forward
+4. Di tengen:
+     ps aux | grep '[d]hcpd'
+     tail -30 /root/no10-tengen-startup.log
+     ip -4 addr show eth0
+     ip route
+     dhcpd -t -cf /etc/dhcp/dhcpd.conf
+5. Di setiap client Alpine jalankan sesuai tabel D.
+6. Catat IP, gateway, DNS, domain dan lease time.
+7. Di tengen, untuk pemeriksaan lease server:
+     grep -E 'lease 192\.222\.[23]\.|binding state|hardware ethernet' /var/lib/dhcp/dhcpd.leases
+   Catatan: ini hanya cuplikan; periksa entri lease terkait dan binding aktif.
+
+TARGET PENGUJIAN CLIENT:
+- itadori/fushiguro : 192.222.2.10-35, gateway 192.222.2.1
+- zenin/okkotsu     : 192.222.2.70-95, gateway 192.222.2.1
+- ino/kusakabe      : 192.222.3.10-89, lease maksimum 1800 detik
+- miwa              : 192.222.3.100-199, lease maksimum 43200 detik
+- kugisaki          : tepat 192.222.3.99 (fixed reservation)
+- Client Net3 gateway: 192.222.3.1
+- DNS opsi: 192.222.1.2 dan 192.222.1.3
+- Domain: K22.com
+
+SCREENSHOT UNTUK LAPORAN:
+[ ] Setelah restart jichi: dhcrelay aktif + startup log
+[ ] Setelah restart tengen: dhcpd aktif + startup log
+[ ] Semua 8 client memperoleh IP sesuai pool dan gateway
+[ ] Output DHCP untuk short/long lease
+[ ] Kugisaki tetap 192.222.3.99 setelah restart
+[ ] Perbandingan DHCP lease server jika diperlukan
+
+=================================================================
+F. TROUBLESHOOTING SINGKAT
+=================================================================
+
+Jika script tidak ditemukan:
+  ls -l /root/no10-jichi.sh /root/init.sh            (di jichi)
+  ls -l /root/no10-tengen.sh /root/init.sh            (di tengen)
+  ls -l /root/no10-client.sh                          (di client)
+
+Jika auto startup tidak jalan:
+  tail -100 /root/no10-jichi-startup.log              (di jichi)
+  tail -100 /root/no10-tengen-startup.log             (di tengen)
+  ls -l /root/init.sh                                 (harus executable)
+
+Jika client gagal DHCP:
+- Pastikan tengen sudah selesai install dan dhcpd aktif.
+- Pastikan relay jichi aktif pada eth2, eth3 DAN eth4.
+- Periksa MAC client dan class DHCP; MAC Docker bisa berubah.
+- Uji ulang setelah 15-30 detik jika server masih inisialisasi.
+- Jangan ubah konfigurasi tanpa melihat output error.
+
+Jika file /etc atau paket hilang seusai stop/start, perhatikan log startup.
+Backup /root script keluar dari project GNS3 sebelum ekspor.
+
+KESIMPULAN
+Dari pengujian yang sudah dilakukan: autostart dhcpd pada tengen dan
+DHCP Relay pada jichi telah terlihat berjalan setelah restart; seluruh
+8 client telah dilaporkan berhasil memperoleh konfigurasi IP/gateway.
+Untuk bukti akhir lengkap, simpan screenshot DNS, waktu lease, dan fixed IP.

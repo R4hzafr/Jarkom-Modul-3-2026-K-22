@@ -1,0 +1,25 @@
+jalanin dulu
+./setup-soal17-gojo.sh
+./setup-soal17-geto.sh
+./setup-soal17-yaga.sh
+
+di nanami sama todo:
+./setup-soal17-api.sh
+
+testing di klien fushiguro
+
+
+terus cek di yaga
+mysql -u root -p
+USE db_shibuya_K22;
+
+SELECT
+    id,
+    source_ip,
+    client_ip,
+    request_path,
+    method,
+    created_at
+FROM request_logs
+ORDER BY id DESC
+LIMIT 20;

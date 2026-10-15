@@ -1,0 +1,8 @@
+run di gojo:
+./setup-soal16-gojo.sh
+
+run di tengen (kalo gabisa dhcpnya):
+./alter_16.sh
+
+test di fushiguro:
+./test-soal16.sh

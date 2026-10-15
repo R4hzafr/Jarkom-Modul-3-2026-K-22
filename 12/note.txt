@@ -1,0 +1,6 @@
+jalankan di utahime:
+./setup-dns-master_12.sh
+
+testing
+di gojo aja:
+./test-dns-12.sh

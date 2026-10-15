@@ -1,0 +1,29 @@
+scriptnya:
+
+nano /root/setup-dhcp.sh
+
+#!/bin/bash
+apt-get update
+apt-get install isc-dhcp-server -y
+
+cat << 'EOF' >> /etc/dhcp/dhcpd.conf
+subnet 192.222.4.0 netmask 255.255.255.0 {
+}
+
+subnet 192.222.2.0 netmask 255.255.255.0 {
+    option routers 192.222.2.1;
+    option subnet-mask 255.255.255.0;
+}
+
+subnet 192.222.3.0 netmask 255.255.255.0 {
+    option routers 192.222.3.1;
+    option subnet-mask 255.255.255.0;
+}
+EOF
+
+/etc/init.d/isc-dhcp-server restart
+
+jalanin:
+
+bash /root/setup-dhcp.sh
+

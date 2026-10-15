@@ -1,0 +1,83 @@
+cat /root/dhcp-net3.sh
+
+
+#!/bin/bash
+PREFIX="192.222"
+GROUP="K22"
+MAC_INO="f2:dd:ec:51:c9:cb"
+MAC_KUSAKABE="02:42:e6:2b:ee:00"
+MAC_MIWA="02:42:50:8b:4c:00"
+MAC_KUGISAKI="02:42:38:7e:bc:00"
+
+cat > /etc/dhcp/net3.conf <<EOF
+class "short" {
+    match if substring(hardware, 1, 6) = ${MAC_INO}
+          or substring(hardware, 1, 6) = ${MAC_KUSAKABE};
+    default-lease-time 1800;
+    max-lease-time 1800;
+}
+class "long" {
+    match if substring(hardware, 1, 6) = ${MAC_MIWA};
+    default-lease-time 43200;
+    max-lease-time 43200;
+}
+
+subnet ${PREFIX}.3.0 netmask 255.255.255.0 {
+    option routers ${PREFIX}.3.1;
+    option broadcast-address ${PREFIX}.3.255;
+    option domain-name-servers ${PREFIX}.1.2, ${PREFIX}.1.3;
+    option domain-search "${GROUP}.com";
+
+    pool {
+        allow members of "short";
+        range ${PREFIX}.3.10 ${PREFIX}.3.89;
+    }
+    pool {
+        allow members of "long";
+        range ${PREFIX}.3.100 ${PREFIX}.3.199;
+    }
+
+    host kugisaki {
+        hardware ethernet ${MAC_KUGISAKI};
+        fixed-address ${PREFIX}.3.99;
+    }
+}
+EOF
+
+grep -q 'net3.conf' /etc/dhcp/dhcpd.conf || echo 'include "/etc/dhcp/net3.conf";' >> /etc/dhcp/dhcpd.conf
+
+dhcpd -t -cf /etc/dhcp/dhcpd.conf || exit 1
+touch /var/lib/dhcp/dhcpd.leases
+pkill dhcpd 2>/dev/null; sleep 1
+service isc-dhcp-server restart || dhcpd -4 -q -cf /etc/dhcp/dhcpd.conf eth0
+ps aux | grep [d]hcpd
+
+Di tengen, cek script sudah terisi
+head -7 /root/dhcp-net3.sh
+
+Harus ada GROUP="K22" dan keempat MAC, tanpa GANTI tersisa.
+Di tengen, cek DHCP Network 2 sudah jalan
+grep include /etc/dhcp/dhcpd.conf
+ps aux | grep dhcpd
+
+Harus ada net2.conf dan proses dhcpd. Kalau tidak ada, jalankan dulu bash /root/dhcp-net2.sh.
+
+Langkah 3: Di jichi, cek relay punya eth3
+ps aux | grep dhcrelay
+
+Harus ada -i eth2 -i eth3 -i eth4. Kalau tidak ada, jalankan bash /root/relay.sh.
+
+Langkah 4: Di tengen, jalankan script nomor 5
+bash /root/dhcp-net3.sh
+
+
+Langkah 5: Di ino, kusakabe, dan miwa, minta IP
+
+Di masing-masing client:
+
+udhcpc -i eth0
+ip a show eth0
+Client	IP yang benar	Lease time
+ino	192.222.3.10 sampai .89	1800
+kusakabe	192.222.3.10 sampai .89	1800
+miwa	192.222.3.100 sampai .199	43200

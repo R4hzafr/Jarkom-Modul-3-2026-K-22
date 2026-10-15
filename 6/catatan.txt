@@ -1,0 +1,78 @@
+Script 1: di tengen (validasi sisi server)
+bash
+cat > /root/test-no6-tengen.sh <<'SCRIPT'
+#!/bin/bash
+LOG=/root/dokumentasi-no6-tengen.txt
+{
+echo "===== NOMOR 6 - TENGEN ====="
+date
+echo
+echo "--- 1. Reservasi kugisaki di net3.conf ---"
+grep -A3 "host kugisaki" /etc/dhcp/net3.conf
+echo
+echo "--- 2. Pool dinamis (.99 harus di luar semuanya) ---"
+grep range /etc/dhcp/net3.conf
+echo
+echo "--- 3. Validasi konfigurasi ---"
+dhcpd -t -cf /etc/dhcp/dhcpd.conf && echo "VALID: tidak ada error"
+echo
+echo "--- 4. Proses dhcpd ---"
+ps aux | grep [d]hcpd
+echo
+echo "--- 5. Lease 192.222.3.99 di dhcpd.leases ---"
+grep -B2 -A8 "192.222.3.99" /var/lib/dhcp/dhcpd.leases | tail -20
+} 2>&1 | tee $LOG
+echo; echo "Disimpan di $LOG"
+SCRIPT
+
+Jalankan setelah kugisaki minta IP:
+
+bash /root/test-no6-tengen.sh
+Script 2: di kugisaki (uji renew)
+
+Kugisaki memakai Alpine, jadi pakai sh, bukan bash:
+
+bash
+cat > /root/test-no6-kugisaki.sh <<'SCRIPT'
+#!/bin/sh
+LOG=/root/dokumentasi-no6-kugisaki.txt
+{
+echo "===== NOMOR 6 - KUGISAKI ====="
+date
+echo
+echo "--- MAC eth0 ---"
+ip link show eth0 | grep link/ether
+echo
+echo "--- Request pertama ---"
+udhcpc -i eth0 -q
+ip -4 addr show eth0 | grep inet
+echo
+echo "--- Renew (request kedua) ---"
+udhcpc -i eth0 -q
+ip -4 addr show eth0 | grep inet
+echo
+echo "--- Routing ---"
+ip route
+echo
+echo "Target: 192.222.3.99/24 di kedua request"
+} 2>&1 | tee $LOG
+echo; echo "Disimpan di $LOG"
+SCRIPT
+
+Jalankan:
+
+sh /root/test-no6-kugisaki.sh
+Urutan
+Di kugisaki: sh /root/test-no6-kugisaki.sh
+Di tengen: bash /root/test-no6-tengen.sh
+Screenshot kedua output untuk dokumentasi.
+Hasil yang benar
+Bagian	Harus terlihat
+Kugisaki, request 1 dan 2	inet 192.222.3.99/24 di keduanya
+Tengen, reservasi	fixed-address 192.222.3.99 dan MAC 02:42:38:7e:bc:00
+Tengen, validasi	VALID: tidak ada error
+Tengen, lease	192.222.3.99 dengan MAC kugisaki
+Kalau ada yang gagal
+Kugisaki tidak dapat .99: bandingkan MAC di output script kugisaki dengan MAC_KUGISAKI di /root/dhcp-net3.sh. Kalau berbeda, perbaiki dengan sed, lalu jalankan bash /root/dhcp-net3.sh lagi.
+Kalau udhcpc -q tidak dikenali: ganti jadi udhcpc -i eth0 -n.
+Kalau baris SCRIPT ikut tertulis di file: hapus dengan sed -i '/^SCRIPT$/d' /root/test-no6-*.sh.

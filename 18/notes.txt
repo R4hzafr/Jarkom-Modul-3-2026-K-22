@@ -1,0 +1,14 @@
+./setup-soal18-geto.sh 
+
+di kirara
+hostname
+ip -br addr
+ss -lntp | grep ':8080'
+curl -i -H 'Host: api.jujutsu.K22.com' http://127.0.0.1:8080/api
+
+di fushigoro
+./test-soal18.sh
+
+test kalo nginx utama (todo nanami) di matiin
+nginx -s stop
+nyalainnya lagi: nginx
