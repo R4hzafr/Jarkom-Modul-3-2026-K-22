@@ -941,6 +941,6 @@ Pengujian pada kondisi `baseline` dengan yang sudah dipasangi `rate limit` dilak
 
 Berdasarkan hasil pengujian, Apache Benchmark berhasil digunakan untuk membandingkan performa frontend dan API dalam kondisi baseline serta ketika rate limiting aktif. Frontend menyelesaikan seluruh 600 request tanpa kegagalan yang dilaporkan pada kedua pengujian. Sementara itu, pada endpoint `/api`, aktivasi rate limiting menyebabkan mayoritas request menerima status HTTP `429`, sesuai dengan fungsi pembatasan request berdasarkan IP klien.
 
-Pemeriksaan access log Gojo juga memperlihatkan adanya respons `200`, `429`, dan `502`. Status tersebut perlu dianalisis secara terpisah untuk membedakan request yang berhasil, request yang ditolak oleh kebijakan keamanan, dan masalah komunikasi dengan upstream. Dengan demikian, pengujian ini menunjukkan bahwa benchmark perlu dievaluasi bersama status HTTP dan log Nginx agar hasil throughput tidak disalahartikan sebagai ukuran keberhasilan pemrosesan aplikasi semata.
+Pemeriksaan access log Gojo juga memperlihatkan adanya respons `200`, `429`, dan `502`. Status tersebut perlu dianalisis secara terpisah untuk membedakan request yang berhasil, request yang ditolak oleh kebijakan keamanan, dan masalah komunikasi dengan upstream.
 
 ---
