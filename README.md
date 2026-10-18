@@ -1,11 +1,15 @@
 # Jarkom-Modul-3-2026-K-22
-# Jarkom-Modul-3-2026-K-22
 
-## Dokumentasi Praktikum Nomor 1--10
+**Anggota Kelompok**
+| Nama                   | NRP        |
+| ---------------------- | ---------- |
+| Muhamad Sabilil Haq    | 5027251041 |
+| M. Faris Roisul Azhar    | 5027251048 |
+
+## Laporan Praktikum
 
 **Kelompok:** K22\
 **Lingkungan:** GNS3 Docker\
-**Prefix jaringan internal:** `192.222.0.0/16`\
 **Domain DHCP:** `K22.com`
 
 Dokumentasi ini merangkum konfigurasi router, DHCP Server, DHCP Relay, pembagian pool berdasarkan MAC address, lease time, reservasi IP, opsi domain, packet capture, pengujian gangguan, dan pemulihan otomatis setelah container dijalankan ulang. Uraian disusun berdasarkan script, catatan, serta bukti terminal yang tersedia pada repository.
@@ -537,19 +541,6 @@ Opsi DNS yang ditampilkan oleh client adalah `192.222.1.2` dan `192.222.1.3`, se
 Berdasarkan catatan dan bukti yang tersedia, DHCP Server pada Tengen serta DHCP Relay pada Jichi berhasil aktif kembali setelah container dijalankan ulang. Delapan client juga tercatat berhasil memperoleh konfigurasi IP dan gateway sesuai kebijakan pool masing-masing. Pengujian ini menunjukkan bahwa konfigurasi dapat dipulihkan melalui script startup tanpa harus mengatur setiap layanan secara manual setiap kali container dimulai ulang.
 
 ------------------------------------------------------------------------
-
-## Kesimpulan
-
-Praktikum nomor 1--10 membangun layanan jaringan internal berbasis GNS3 dengan Jichi sebagai router dan DHCP Relay, serta Tengen sebagai DHCP Server. Konfigurasi DHCP dikembangkan secara bertahap, mulai dari deklarasi subnet, pembagian pool Network 2 berdasarkan MAC address, pengaturan lease time pada Network 3, reservasi IP Kugisaki, hingga pemberian opsi DNS dan domain `K22.com`.
-
-Packet capture menggunakan tcpdump membantu memeriksa lalu lintas DHCP yang melewati relay. Pengujian gangguan menunjukkan bahwa Itadori gagal memperoleh lease ketika relay dimatikan dan kembali mendapat alamat IP setelah relay diaktifkan. Pada nomor 10, script startup digunakan untuk memulihkan konfigurasi Jichi dan Tengen setelah container dijalankan ulang. Hasil pengujian pada delapan client menunjukkan alamat IP dan gateway sesuai dengan rentang yang ditentukan.
-
-### Catatan akhir sebelum laporan dikumpulkan
-
-1.  Ganti screenshot lama `5/config.png` dengan screenshot konfigurasi akhir Network 3 yang menggunakan MAC address dan domain `K22.com`.
-2.  Jika perlu membuktikan lease time Miwa tepat `43200` detik, ambil screenshot hasil lease baru; bukti yang ada menampilkan `39024` detik pada saat pengambilan gambar.
-3.  Screenshot relay nomor 3 merupakan bukti awal yang hanya menampilkan `eth2` dan `eth3`. Gunakan juga screenshot nomor 10 untuk menunjukkan konfigurasi akhir yang mencakup `eth2`, `eth3`, dan `eth4`.
-4.  Pada screenshot nomor 2, layanan DHCPv4 terlihat mulai berjalan, sedangkan DHCPv6 gagal. Pastikan laporan hanya menyatakan DHCPv4 berhasil aktif jika memang itu yang diverifikasi.
 
 > 11. Utahime dan Shoko ditugaskan membangun sistem penamaan domain resmi agar seluruh pos tidak perlu menghafal alamat IP mentah. Konfigurasikan BIND9 pada utahime sebagai DNS Master dan shoko sebagai DNS Slave untuk mengelola domain jujutsu.<xxxx>.com. Atur SOA record, NS delegasi untuk kedua server, dan terapkan allow-transfer dari Master ke Slave. Pastikan file zona berhasil tersinkronisasi otomatis ke shoko saat nomor serial di utahime dinaikkan, lalu buktikan dengan melakukan query dig ke kedua server dari salah satu client.
 
