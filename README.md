@@ -1,4 +1,555 @@
 # Jarkom-Modul-3-2026-K-22
+# Jarkom-Modul-3-2026-K-22
+
+## Dokumentasi Praktikum Nomor 1--10
+
+**Kelompok:** K22\
+**Lingkungan:** GNS3 Docker\
+**Prefix jaringan internal:** `192.222.0.0/16`\
+**Domain DHCP:** `K22.com`
+
+Dokumentasi ini merangkum konfigurasi router, DHCP Server, DHCP Relay, pembagian pool berdasarkan MAC address, lease time, reservasi IP, opsi domain, packet capture, pengujian gangguan, dan pemulihan otomatis setelah container dijalankan ulang. Uraian disusun berdasarkan script, catatan, serta bukti terminal yang tersedia pada repository.
+
+------------------------------------------------------------------------
+
+## 1. Konfigurasi Router dan Jaringan Internal pada Jichi
+
+Pada tahap pertama, node **Jichi** digunakan sebagai router yang menghubungkan Network 1, Network 2, Network 3, dan Network 4. Interface `eth0` digunakan sebagai jalur WAN menuju jaringan NAT, sedangkan `eth1` sampai `eth4` menjadi gateway untuk masing-masing jaringan internal. IP forwarding diaktifkan agar paket dapat diteruskan antarsubnet, dan NAT disiapkan agar jaringan internal dapat menggunakan jalur WAN.
+
+Konfigurasi alamat yang digunakan adalah:
+
+  Interface   Fungsi              Alamat IPv4
+  ----------- ------------------- ----------------------
+  `eth0`      WAN                 `192.168.122.103/24`
+  `eth1`      Gateway Network 1   `192.222.1.1/24`
+  `eth2`      Gateway Network 2   `192.222.2.1/24`
+  `eth3`      Gateway Network 3   `192.222.3.1/24`
+  `eth4`      Gateway Network 4   `192.222.4.1/24`
+
+Script `setup-router.sh` mengaktifkan seluruh interface, menetapkan alamat IP, mengatur default route melalui `192.168.122.1`, mengaktifkan `net.ipv4.ip_forward`, dan menambahkan aturan `MASQUERADE` pada tabel NAT.
+
+Script yang digunakan: [setup-router.sh](nodes/jichi/setup-router.sh)
+
+Jalankan pada **console Jichi (Debian)**:
+
+``` bash
+bash /root/setup-router.sh
+```
+
+Verifikasi dapat dilakukan dengan:
+
+``` bash
+ip -4 -br addr
+ip route
+sysctl net.ipv4.ip_forward
+iptables -t nat -S POSTROUTING
+```
+
+Hasil yang diharapkan adalah seluruh interface internal memiliki alamat sesuai subnet, default route mengarah ke `192.168.122.1`, nilai IP forwarding adalah `1`, dan aturan NAT untuk trafik jaringan internal terlihat pada output.
+
+**Gambar 1.1 --- Konfigurasi jaringan pada node Jichi**
+
+![Gambar 1.1 Konfigurasi jaringan pada node Jichi](1/Config.png)
+
+------------------------------------------------------------------------
+
+## 2. Instalasi dan Konfigurasi Dasar DHCP Server pada Tengen
+
+Pada tahap kedua, node **Tengen** berperan sebagai DHCP Server untuk Network 2 dan Network 3. Server menggunakan interface `eth0` dengan alamat `192.222.4.10/24` pada Network 4. Konfigurasi dasar mendeklarasikan subnet server serta menyertakan file konfigurasi khusus untuk Network 2 dan Network 3. Pembagian pool dinamis diatur pada tahap berikutnya agar konfigurasi dasar tidak bercampur dengan kebijakan masing-masing jaringan.
+
+Script dasar yang tersimpan pada repository adalah [dhcp-base.sh](nodes/switch6/switch10/tengen/dhcp-base.sh). Catatan awal juga memuat pembuatan `/root/setup-dhcp.sh`; untuk dokumentasi repository ini, script `dhcp-base.sh` digunakan sebagai acuan konfigurasi dasar yang dipakai pada pemulihan.
+
+Jalankan pada **console Tengen (Debian)**:
+
+``` bash
+bash /root/dhcp-base.sh
+dhcpd -t -cf /etc/dhcp/dhcpd.conf
+service isc-dhcp-server restart
+pgrep -a -x dhcpd
+ip -4 addr show eth0
+```
+
+Perintah `dhcpd -t` memeriksa sintaks konfigurasi, `service isc-dhcp-server restart` menerapkan konfigurasi, sedangkan `pgrep` digunakan untuk memeriksa proses DHCP Server. Script `dhcp-net2.sh` dan `dhcp-net3.sh` juga memanggil proses restart ketika pool masing-masing dikonfigurasi. Server dikonfigurasi untuk melayani DHCPv4 melalui interface `eth0`.
+
+Pada salah satu bukti awal, proses DHCPv4 terlihat mulai berjalan, sedangkan komponen DHCPv6 menampilkan status gagal. Praktikum ini menggunakan DHCPv4; karena itu, status DHCPv4 tetap harus diperiksa secara terpisah dan tidak boleh menyimpulkan bahwa seluruh layanan IPv6 ikut berhasil.
+
+Script: [dhcp-base.sh](nodes/switch6/switch10/tengen/dhcp-base.sh)
+
+**Gambar 2.1 --- Pembaruan daftar paket pada Tengen**
+
+![Gambar 2.1 Pembaruan daftar paket pada Tengen](2/apt%20update.png)
+
+**Gambar 2.2 --- Pembuatan file konfigurasi DHCP**
+
+![Gambar 2.2 Pembuatan file konfigurasi DHCP](2/buat%20file%20konfig%20di%20nano.png)
+
+**Gambar 2.3 --- Pemeriksaan layanan DHCPv4**
+
+![Gambar 2.3 Pemeriksaan layanan DHCPv4](2/berhasil%20ipv4.png)
+
+------------------------------------------------------------------------
+
+## 3. Konfigurasi DHCP Relay pada Jichi
+
+DHCP Relay diperlukan karena client pada Network 2 dan Network 3 berada pada subnet yang berbeda dari DHCP Server di Network 4. Node Jichi meneruskan permintaan DHCP dari client menuju server `192.222.4.10`. Pada konfigurasi akhir, relay dijalankan dengan interface `eth2`, `eth3`, dan `eth4` agar permintaan dari Network 2 dan Network 3 dapat diteruskan serta balasan server dapat melewati jaringan yang sesuai.
+
+Script yang digunakan: [relay.sh](nodes/jichi/relay.sh)
+
+Jalankan pada **console Jichi (Debian)**:
+
+``` bash
+bash /root/relay.sh
+pgrep -a -x dhcrelay
+```
+
+Proses relay dapat diperiksa dengan `pgrep`. Tujuan DHCP Server yang digunakan adalah `192.222.4.10`.
+
+Bukti awal pada folder nomor 3 menunjukkan proses `dhcrelay` aktif, tetapi output pada screenshot lama hanya menampilkan `eth2` dan `eth3`. Konfigurasi akhir yang digunakan untuk pemulihan pada nomor 10 sudah mencakup `eth2`, `eth3`, dan `eth4`. Karena itu, bukti akhir ketiga interface juga ditampilkan kembali pada bagian nomor 10.
+
+**Gambar 3.1 --- Persiapan paket pada Jichi**
+
+![Gambar 3.1 Persiapan paket pada Jichi](3/apt%20update.png)
+
+**Gambar 3.2 --- Konfigurasi DHCP Relay**
+
+![Gambar 3.2 Konfigurasi DHCP Relay](3/config.png)
+
+**Gambar 3.3 --- Proses DHCP Relay pada pengujian awal**
+
+![Gambar 3.3 Proses DHCP Relay pada pengujian awal](3/dhcp%20relay%20udah%20aktif.png)
+
+------------------------------------------------------------------------
+
+## 4. Pembagian DHCP Pool Network 2 Berdasarkan MAC Address
+
+Pada tahap ini, DHCP Server Tengen dikonfigurasi untuk membagi alamat IP Network 2 berdasarkan MAC address client. Pengelompokan ini menggunakan dua class, yaitu `pool1` dan `pool2`, sehingga client memperoleh alamat dari rentang yang telah ditentukan dan tidak menggunakan satu pool yang sama.
+
+Ketentuan pool Network 2 adalah:
+
+  -----------------------------------------------------------------------------------------
+  Class             Client                  Rentang IP                    Gateway
+  ----------------- ----------------------- ----------------------------- -----------------
+  `pool1`           Itadori dan Fushiguro   `192.222.2.10–192.222.2.35`   `192.222.2.1`
+
+  `pool2`           Zenin dan Okkotsu       `192.222.2.70–192.222.2.95`   `192.222.2.1`
+  -----------------------------------------------------------------------------------------
+
+Script `dhcp-net2.sh` membuat class berdasarkan MAC address, menetapkan gateway dan broadcast address, serta memberikan opsi DNS dan domain `K22.com`. Setelah konfigurasi ditulis, script menjalankan proses restart DHCP Server melalui `dhcp-restart.sh`.
+
+Script yang digunakan: [dhcp-net2.sh](nodes/switch6/switch10/tengen/dhcp-net2.sh)
+
+Jalankan pada **console Tengen (Debian)**:
+
+``` bash
+bash /root/dhcp-net2.sh
+dhcpd -t -cf /etc/dhcp/dhcpd.conf
+pgrep -a -x dhcpd
+```
+
+Pengujian dilakukan pada empat client Alpine:
+
+-   **Itadori:** menjalankan `udhcpc -i eth0`; hasil yang terdokumentasi adalah `192.222.2.10`.
+-   **Fushiguro:** menjalankan `udhcpc -i eth0`; hasil yang terdokumentasi adalah `192.222.2.11`.
+-   **Zenin:** menjalankan `udhcpc -i eth0`; hasil yang terdokumentasi adalah `192.222.2.70`.
+-   **Okkotsu:** menjalankan `udhcpc -i eth0`; hasil yang terdokumentasi adalah `192.222.2.71`.
+
+Hasil tersebut menunjukkan bahwa dua client pertama memperoleh alamat dari rentang `pool1`, sedangkan Zenin dan Okkotsu memperoleh alamat dari rentang `pool2`.
+
+Script: [dhcp-net2.sh](nodes/switch6/switch10/tengen/dhcp-net2.sh)
+
+**Gambar 4.1 --- DHCP Server aktif dan konfigurasi berhasil diperiksa**
+
+![Gambar 4.1 DHCP Server aktif](4/menjalankan%20dan%20mengecek.png)
+
+**Gambar 4.2 --- Rekapitulasi MAC address client**
+
+![Gambar 4.2 Rekapitulasi MAC address client](4/recap%20mac%20address.png)
+
+**Gambar 4.3 --- Informasi lease dengan MAC address dan IP**
+
+![Gambar 4.3 Informasi lease dengan MAC address dan IP](4/tercatat%20lengkap%20dengan%20MAC%20dan%20IP-nya..png)
+
+**Gambar 4.4 --- Pengujian client Itadori**
+
+![Gambar 4.4 Pengujian client Itadori](4/cek%20itadori.png)
+
+**Gambar 4.5 --- Pengujian client Fushiguro**
+
+![Gambar 4.5 Pengujian client Fushiguro](4/cek%20fushiguro.png)
+
+**Gambar 4.6 --- Pengujian client Zenin**
+
+![Gambar 4.6 Pengujian client Zenin](4/cek%20zenin.png)
+
+**Gambar 4.7 --- Pengujian client Okkotsu**
+
+![Gambar 4.7 Pengujian client Okkotsu](4/cek%20okkotsu.png)
+
+------------------------------------------------------------------------
+
+## 5. Pengaturan Lease Time DHCP pada Network 3
+
+Pada Network 3, DHCP Server membedakan lease time berdasarkan kelompok client. Client Ino dan Kusakabe ditempatkan pada class `short`, sedangkan Miwa ditempatkan pada class `long`. Pengelompokan tersebut dibuat berdasarkan MAC address, bukan hanya nama host, agar aturan pool dan lease time mengikuti perangkat yang meminta alamat IP.
+
+Ketentuan konfigurasi Network 3 adalah:
+
+  ---------------------------------------------------------------------------------------------
+  Class             Client             Rentang IP                      Default/max lease time
+  ----------------- ------------------ ------------------------------- ------------------------
+  `short`           Ino dan Kusakabe   `192.222.3.10–192.222.3.89`     `1800` detik
+
+  `long`            Miwa               `192.222.3.100–192.222.3.199`   `43200` detik
+  ---------------------------------------------------------------------------------------------
+
+Gateway Network 3 adalah `192.222.3.1`. Opsi DNS dan domain juga ditetapkan ke `192.222.1.2`, `192.222.1.3`, dan `K22.com`.
+
+Script yang digunakan: [dhcp-net3.sh](nodes/switch6/switch10/tengen/dhcp-net3.sh)
+
+Jalankan pada **console Tengen (Debian)**:
+
+``` bash
+bash /root/dhcp-net3.sh
+dhcpd -t -cf /etc/dhcp/dhcpd.conf
+pgrep -a -x dhcpd
+```
+
+**Catatan bukti:** screenshot `5/config.png` pada ZIP masih memperlihatkan konfigurasi lama, yaitu domain `K01.com` dan class berbasis hostname. Screenshot tersebut tidak cocok dijadikan bukti konfigurasi final. Ganti dengan screenshot terbaru dari Tengen yang memperlihatkan isi `/etc/dhcp/net3.conf` dengan class berbasis MAC address dan domain `K22.com`.
+
+**\[TEMPAT GAMBAR 5.1 --- TEMPEL SCREENSHOT TERBARU DI SINI\]**\
+Ambil screenshot pada console Tengen setelah konfigurasi final diterapkan. Tampilkan perintah:
+
+``` bash
+cat /etc/dhcp/net3.conf
+dhcpd -t -cf /etc/dhcp/dhcpd.conf
+```
+
+**Gambar 5.2 --- Pemanggilan script konfigurasi Network 3**
+
+![Gambar 5.2 Pemanggilan script konfigurasi Network 3](5/berhasil.png)
+
+**Gambar 5.3 --- Pengujian lease time pada Ino**
+
+![Gambar 5.3 Pengujian lease time pada Ino](10/pengujian%20ino.png)
+
+**Gambar 5.4 --- Pengujian lease time pada Kusakabe**
+
+![Gambar 5.4 Pengujian lease time pada Kusakabe](10/pengujian%20kusakabe.png)
+
+**Gambar 5.5 --- Pengujian lease time pada Miwa**
+
+![Gambar 5.5 Pengujian lease time pada Miwa](10/pengujian%20miwa.png)
+
+Pada bukti pengujian, Ino dan Kusakabe memperoleh alamat dalam rentang `short` dengan lease time 1800 detik. Miwa memperoleh alamat `192.222.3.100`; screenshot yang tersedia menunjukkan lease time 39024 detik pada saat pengambilan gambar, sedangkan konfigurasi menetapkan default dan maksimum 43200 detik. Jika penguji mensyaratkan bukti angka tepat 43200 detik, lakukan permintaan lease baru dan ambil screenshot terbaru.
+
+------------------------------------------------------------------------
+
+## 6. Reservasi IP Tetap untuk Kugisaki
+
+Pada tahap ini, Kugisaki dikonfigurasi agar selalu memperoleh alamat `192.222.3.99` melalui reservasi DHCP. Reservasi dilakukan dengan mencocokkan MAC address Kugisaki dan memberikan parameter `fixed-address`. Alamat `.99` tidak berada dalam rentang pool dinamis `short` maupun `long`, sehingga tidak dipakai oleh client dinamis lain.
+
+Ketentuan reservasi:
+
+-   Client: Kugisaki
+-   MAC address: `02:42:38:7e:bc:00`
+-   Fixed address: `192.222.3.99`
+-   Gateway: `192.222.3.1`
+
+Konfigurasi reservasi berada di [dhcp-net3.sh](nodes/switch6/switch10/tengen/dhcp-net3.sh). Pemeriksaan server dapat dilakukan melalui [test-no6-tengen.sh](nodes/switch6/switch10/tengen/test-no6-tengen.sh), sedangkan pengujian renew dilakukan melalui [test-no6-kugisaki.sh](nodes/switch4/switch8/kugisaki/test-no6-kugisaki.sh).
+
+Pengujian dilakukan dengan meminta lease pada Kugisaki sebanyak dua kali. Hasil yang diharapkan adalah alamat `192.222.3.99/24` tetap sama setelah permintaan ulang. Pada sisi Tengen, konfigurasi host, MAC address, fixed address, serta validitas konfigurasi DHCP diperiksa.
+
+**Gambar 6.1 --- Pemeriksaan reservasi IP Kugisaki pada Tengen**
+
+![Gambar 6.1 Pemeriksaan reservasi IP Kugisaki pada Tengen](6/setelah%20kugisaki%20minta%20IP.png)
+
+**Gambar 6.2 --- Pengujian renew Kugisaki dan hasil IP tetap**
+
+![Gambar 6.2 Pengujian renew Kugisaki dan hasil IP tetap](6/uji%20renew.png)
+
+Hasil pengujian menunjukkan Kugisaki memperoleh `192.222.3.99` pada permintaan pertama dan kedua. Dengan demikian, reservasi alamat berdasarkan MAC address bekerja sesuai tujuan.
+
+------------------------------------------------------------------------
+
+## 7. Pemberian Opsi Domain dan DNS melalui DHCP
+
+Pada tahap ini, opsi domain dan DNS disertakan dalam konfigurasi DHCP agar client menerima informasi resolver dan domain pencarian secara otomatis. Network 2 dan Network 3 menggunakan opsi DNS `192.222.1.2` serta `192.222.1.3`, sedangkan domain pencarian dan domain yang diberikan adalah `K22.com`.
+
+Opsi yang digunakan meliputi:
+
+``` text
+option domain-name-servers 192.222.1.2, 192.222.1.3;
+option domain-search "K22.com";
+option domain-name "K22.com";
+```
+
+Konfigurasi tersebut diterapkan pada file `net2.conf` dan `net3.conf` di Tengen melalui script [dhcp-net2.sh](nodes/switch6/switch10/tengen/dhcp-net2.sh) dan [dhcp-net3.sh](nodes/switch6/switch10/tengen/dhcp-net3.sh). Validasi server dapat dibantu dengan [no7-server.sh](nodes/switch6/switch10/tengen/no7-server.sh).
+
+Setelah client meminta lease baru, isi `/etc/resolv.conf` diperiksa untuk memastikan nilai `search K22.com` serta kedua nameserver diterima. Pengujian ini membuktikan opsi DHCP telah dikirim ke client; pengujian ini sendiri tidak membuktikan bahwa layanan DNS pada alamat tersebut sudah menjawab query.
+
+**Gambar 7.1 --- Penambahan opsi domain pada konfigurasi DHCP**
+
+![Gambar 7.1 Penambahan opsi domain pada konfigurasi DHCP](7/penambahan%20domain%20name.png)
+
+**Gambar 7.2 --- Pemeriksaan include konfigurasi Network 2 dan Network 3**
+
+![Gambar 7.2 Pemeriksaan include konfigurasi Network 2 dan Network 3](7/pengecekan%20net%202%20dan%20net%203.png)
+
+**Gambar 7.3 --- Verifikasi opsi DHCP pada Fushiguro**
+
+![Gambar 7.3 Verifikasi opsi DHCP pada Fushiguro](7/validasi%20fushiguro.png)
+
+**Gambar 7.4 --- Verifikasi opsi DHCP pada Zenin**
+
+![Gambar 7.4 Verifikasi opsi DHCP pada Zenin](7/validasi%20zenin.png)
+
+**Gambar 7.5 --- Verifikasi opsi DHCP pada Itadori**
+
+![Gambar 7.5 Verifikasi opsi DHCP pada Itadori](7/verif%20itadori.png)
+
+Pada hasil client, informasi domain pencarian dan nameserver diperiksa melalui `/etc/resolv.conf`. Opsi tersebut kemudian terlihat kembali pada pengujian DHCP nomor 10.
+
+------------------------------------------------------------------------
+
+## 8. Packet Capture Transaksi DHCP Menggunakan tcpdump
+
+Pada tahap ini, paket DHCP ditangkap untuk mengamati pertukaran pesan antara client, DHCP Relay, dan DHCP Server. Capture dilakukan pada interface `eth0` milik Tengen dengan filter UDP port 67 dan 68, yang digunakan oleh DHCP.
+
+Script yang digunakan: [no8-capture.sh](nodes/switch6/switch10/tengen/no8-capture.sh)
+
+Capture Network 2 dijalankan dari **console Tengen** dengan:
+
+``` bash
+sh /root/no8-capture.sh net2
+```
+
+Kemudian, pada client Network 2 seperti Itadori, minta lease baru:
+
+``` sh
+ip addr flush dev eth0
+udhcpc -i eth0 -n -q
+```
+
+Untuk Network 3, jalankan pada Tengen:
+
+``` bash
+sh /root/no8-capture.sh net3
+```
+
+Kemudian, dari client Network 3 seperti Ino, minta lease baru. Setelah paket tertangkap, hentikan capture dengan `Ctrl+C` dan baca hasil capture menggunakan mode `baca2` atau `baca3` yang tersedia pada script.
+
+Pada hasil capture, informasi yang diperiksa meliputi DHCP message type, MAC address client, alamat gateway relay (`Gateway-IP`), serta alur permintaan DHCP. Bukti Network 2 memperlihatkan paket yang berkaitan dengan permintaan client Itadori, sedangkan bukti Network 3 memperlihatkan permintaan dari Ino melalui gateway `192.222.3.1`.
+
+**Gambar 8.1 --- Pemeriksaan instalasi tcpdump pada Tengen**
+
+![Gambar 8.1 Pemeriksaan instalasi tcpdump pada Tengen](8/install%20tcp.png)
+
+**Gambar 8.2 --- Memicu permintaan DHCP dari Network 2**
+
+![Gambar 8.2 Memicu permintaan DHCP dari Network 2](8/memicu%20dhcp%20dari%20net%202.png)
+
+**Gambar 8.3 --- Menjalankan packet capture**
+
+![Gambar 8.3 Menjalankan packet capture](8/menjalankan%20paket%20capture%20.png)
+
+**Gambar 8.4 --- Hasil capture permintaan DHCP dari Ino pada Network 3**
+
+![Gambar 8.4 Hasil capture permintaan DHCP dari Ino pada Network 3](8/menangkap%20hasil%20dari%20ino.png)
+
+Hasil capture menunjukkan bahwa paket DHCP dapat diamati di sisi server, termasuk informasi client dan gateway relay. Dengan demikian, tcpdump digunakan untuk memeriksa lalu lintas DHCP yang melewati jaringan.
+
+------------------------------------------------------------------------
+
+## 9. Pengujian Gangguan dan Pemulihan DHCP Relay
+
+Nomor 9 menguji ketergantungan client terhadap DHCP Relay. Ketika relay pada Jichi dimatikan, Itadori diminta menghapus alamat IPv4 lama lalu meminta lease baru. Karena permintaan DHCP dari Network 2 tidak lagi diteruskan ke server, client seharusnya gagal memperoleh lease. Setelah relay diaktifkan kembali, permintaan DHCP diulang dan client diharapkan memperoleh IP dari pool yang benar.
+
+Script pengendali relay pada Jichi adalah [no9-relay.sh](nodes/jichi/no9-relay.sh). Script penguji client pada Itadori adalah [no9-test.sh](nodes/switch2/switch3/itadori/no9-test.sh).
+
+**A. Menguji ketika relay mati**
+
+Jalankan pada **console Jichi**:
+
+``` bash
+bash /root/no9-relay.sh stop
+bash /root/no9-relay.sh status
+```
+
+Kemudian jalankan pada **console Itadori**:
+
+``` sh
+sh /root/no9-test.sh
+```
+
+Hasil yang diharapkan adalah client tidak memperoleh lease DHCP. Kondisi ini digunakan untuk menunjukkan bahwa permintaan DHCP dari Network 2 memerlukan relay agar dapat mencapai DHCP Server di Network 4.
+
+**B. Menguji setelah relay diaktifkan kembali**
+
+Pada console Jichi:
+
+``` bash
+bash /root/no9-relay.sh start
+bash /root/no9-relay.sh status
+```
+
+Kemudian, pada console Itadori:
+
+``` sh
+sh /root/no9-test.sh
+ip -4 addr show eth0
+ip route
+```
+
+Hasil yang terdokumentasi menunjukkan bahwa ketika relay mati, Itadori gagal mendapatkan lease. Setelah relay aktif kembali, Itadori memperoleh `192.222.2.10` dari DHCP Server `192.222.4.10` dan menggunakan gateway `192.222.2.1`.
+
+**Gambar 9.1 --- Mematikan DHCP Relay pada Jichi**
+
+![Gambar 9.1 Mematikan DHCP Relay pada Jichi](9/mematikan%20dhcp.png)
+
+**Gambar 9.2 --- Client gagal memperoleh lease ketika relay mati**
+
+![Gambar 9.2 Client gagal memperoleh lease ketika relay mati](9/uji%20dhcp%20saat%20relay%20mati.png)
+
+**Gambar 9.3 --- Mengaktifkan kembali DHCP Relay**
+
+![Gambar 9.3 Mengaktifkan kembali DHCP Relay](9/uji%20dhcp%20dihidupkan.png)
+
+**Gambar 9.4 --- Itadori kembali memperoleh IP setelah relay aktif**
+
+![Gambar 9.4 Itadori kembali memperoleh IP setelah relay aktif](9/itadori%20bisa%20mendapatkan%20IP%20kembali%20setelah%20DHCP%20Relay%20di%20jichi%20diaktifkan..png)
+
+Pengujian ini menunjukkan perbedaan hasil sebelum dan sesudah relay diaktifkan. Setelah pengujian selesai, relay harus tetap dihidupkan kembali agar client dapat menggunakan layanan DHCP secara normal.
+
+------------------------------------------------------------------------
+
+## 10. Autostart dan Pemulihan DHCP setelah Container Dijalankan Ulang
+
+Nomor 10 berfokus pada pemulihan layanan setelah node dihentikan dan dijalankan kembali di GNS3. Script pemulihan dibuat pada Jichi dan Tengen, lalu dipanggil melalui `/root/init.sh`. Pada lingkungan container yang digunakan, `/etc/debinet-init.sh` akan menjalankan `/root/init.sh` apabila file tersebut tersedia dan memiliki izin executable.
+
+### 10.1. Pemulihan Jichi
+
+Script [no10-jichi.sh](nodes/jichi/no10-jichi.sh) menjalankan kembali konfigurasi router, mengatur alamat WAN dan default route, mengaktifkan IP forwarding, lalu menjalankan DHCP Relay. Script ini juga mencatat output pemulihan ke file log.
+
+File [init.sh](nodes/jichi/init.sh) pada Jichi menjalankan script pemulihan di background dan menyimpan output ke log startup.
+
+Verifikasi dilakukan pada **console Jichi**:
+
+``` bash
+pgrep -a -x dhcrelay
+ip -4 addr show
+ip route
+sysctl net.ipv4.ip_forward
+iptables -t nat -S POSTROUTING
+tail -30 /root/no10-jichi-startup.log
+```
+
+Hasil yang diharapkan adalah relay aktif pada `eth2`, `eth3`, dan `eth4`, tujuan DHCP Server `192.222.4.10`, serta `net.ipv4.ip_forward = 1`.
+
+### 10.2. Pemulihan Tengen
+
+Script [no10-tengen.sh](nodes/switch6/switch10/tengen/no10-tengen.sh) memulihkan alamat jaringan Tengen, menyiapkan konfigurasi dasar, memuat kembali konfigurasi Network 2 dan Network 3, memvalidasi `dhcpd.conf`, serta memastikan DHCP Server berjalan. File [init.sh](nodes/switch6/switch10/tengen/init.sh) menjalankan proses tersebut otomatis dan menyimpan output ke log startup.
+
+Verifikasi dilakukan pada **console Tengen**:
+
+``` bash
+pgrep -a -x dhcpd
+ip -4 addr show eth0
+ip route
+dhcpd -t -cf /etc/dhcp/dhcpd.conf
+tail -30 /root/no10-tengen-startup.log
+```
+
+Hasil yang terdokumentasi menunjukkan Tengen menggunakan `192.222.4.10/24` dan proses `dhcpd` aktif pada interface `eth0`.
+
+### 10.3. Pengujian Delapan Client
+
+Script pengujian client adalah [no10-client.sh](nodes/switch2/switch3/itadori/no10-client.sh). Script yang sama disiapkan pada masing-masing node Alpine. Script menghapus alamat dan default route lama, meminta lease baru menggunakan `udhcpc`, kemudian memeriksa rentang IP dan gateway.
+
+Perintah yang dijalankan pada setiap client adalah:
+
+  -----------------------------------------------------------------------------------------------------
+  Client            Perintah                          Rentang/target IP               Gateway
+  ----------------- --------------------------------- ------------------------------- -----------------
+  Itadori           `sh /root/no10-client.sh pool1`   `192.222.2.10–192.222.2.35`     `192.222.2.1`
+
+  Fushiguro         `sh /root/no10-client.sh pool1`   `192.222.2.10–192.222.2.35`     `192.222.2.1`
+
+  Zenin             `sh /root/no10-client.sh pool2`   `192.222.2.70–192.222.2.95`     `192.222.2.1`
+
+  Okkotsu           `sh /root/no10-client.sh pool2`   `192.222.2.70–192.222.2.95`     `192.222.2.1`
+
+  Ino               `sh /root/no10-client.sh short`   `192.222.3.10–192.222.3.89`     `192.222.3.1`
+
+  Kusakabe          `sh /root/no10-client.sh short`   `192.222.3.10–192.222.3.89`     `192.222.3.1`
+
+  Miwa              `sh /root/no10-client.sh long`    `192.222.3.100–192.222.3.199`   `192.222.3.1`
+
+  Kugisaki          `sh /root/no10-client.sh fixed`   `192.222.3.99`                  `192.222.3.1`
+  -----------------------------------------------------------------------------------------------------
+
+Hasil alamat yang terlihat pada screenshot adalah Itadori `192.222.2.10`, Fushiguro `192.222.2.11`, Zenin `192.222.2.70`, Okkotsu `192.222.2.71`, Ino `192.222.3.10`, Kusakabe `192.222.3.11`, Miwa `192.222.3.100`, dan Kugisaki `192.222.3.99`. Seluruh hasil tersebut berada dalam rentang yang sesuai, dengan Kugisaki menggunakan alamat reservasi.
+
+Opsi DNS yang ditampilkan oleh client adalah `192.222.1.2` dan `192.222.1.3`, sedangkan domain pencarian adalah `K22.com`.
+
+**Gambar 10.1 --- Verifikasi DHCP Server aktif pada Tengen**
+
+![Gambar 10.1 Verifikasi DHCP Server aktif pada Tengen](10/verifikasi%20tengen%20aktif.png)
+
+**Gambar 10.2 --- DHCP Relay aktif, IP forwarding, dan NAT pada Jichi**
+
+![Gambar 10.2 DHCP Relay aktif, IP forwarding, dan NAT pada Jichi](10/DHCP%20Relay%20aktif%20dan%20IP%20forwarding%20bernilai%201.png)
+
+**Gambar 10.3 --- Bukti pengujian otomatisasi DHCP**
+
+![Gambar 10.3 Bukti pengujian otomatisasi DHCP](10/bukti%20automate%20dhcp.png)
+
+**Gambar 10.4 --- Hasil client Itadori**
+
+![Gambar 10.4 Hasil client Itadori](10/pengujian%20itadori.png)
+
+**Gambar 10.5 --- Hasil client Fushiguro**
+
+![Gambar 10.5 Hasil client Fushiguro](10/pengujian%20fushiguro.png)
+
+**Gambar 10.6 --- Hasil client Zenin**
+
+![Gambar 10.6 Hasil client Zenin](10/pengujian%20zenin.png)
+
+**Gambar 10.7 --- Hasil client Okkotsu**
+
+![Gambar 10.7 Hasil client Okkotsu](10/pengujian%20okkutsu.png)
+
+**Gambar 10.8 --- Hasil client Ino**
+
+![Gambar 10.8 Hasil client Ino](10/pengujian%20ino.png)
+
+**Gambar 10.9 --- Hasil client Kusakabe**
+
+![Gambar 10.9 Hasil client Kusakabe](10/pengujian%20kusakabe.png)
+
+**Gambar 10.10 --- Hasil client Miwa**
+
+![Gambar 10.10 Hasil client Miwa](10/pengujian%20miwa.png)
+
+**Gambar 10.11 --- Hasil client Kugisaki**
+
+![Gambar 10.11 Hasil client Kugisaki](10/pengujian%20kugisaki.png)
+
+Berdasarkan catatan dan bukti yang tersedia, DHCP Server pada Tengen serta DHCP Relay pada Jichi berhasil aktif kembali setelah container dijalankan ulang. Delapan client juga tercatat berhasil memperoleh konfigurasi IP dan gateway sesuai kebijakan pool masing-masing. Pengujian ini menunjukkan bahwa konfigurasi dapat dipulihkan melalui script startup tanpa harus mengatur setiap layanan secara manual setiap kali container dimulai ulang.
+
+------------------------------------------------------------------------
+
+## Kesimpulan
+
+Praktikum nomor 1--10 membangun layanan jaringan internal berbasis GNS3 dengan Jichi sebagai router dan DHCP Relay, serta Tengen sebagai DHCP Server. Konfigurasi DHCP dikembangkan secara bertahap, mulai dari deklarasi subnet, pembagian pool Network 2 berdasarkan MAC address, pengaturan lease time pada Network 3, reservasi IP Kugisaki, hingga pemberian opsi DNS dan domain `K22.com`.
+
+Packet capture menggunakan tcpdump membantu memeriksa lalu lintas DHCP yang melewati relay. Pengujian gangguan menunjukkan bahwa Itadori gagal memperoleh lease ketika relay dimatikan dan kembali mendapat alamat IP setelah relay diaktifkan. Pada nomor 10, script startup digunakan untuk memulihkan konfigurasi Jichi dan Tengen setelah container dijalankan ulang. Hasil pengujian pada delapan client menunjukkan alamat IP dan gateway sesuai dengan rentang yang ditentukan.
+
+### Catatan akhir sebelum laporan dikumpulkan
+
+1.  Ganti screenshot lama `5/config.png` dengan screenshot konfigurasi akhir Network 3 yang menggunakan MAC address dan domain `K22.com`.
+2.  Jika perlu membuktikan lease time Miwa tepat `43200` detik, ambil screenshot hasil lease baru; bukti yang ada menampilkan `39024` detik pada saat pengambilan gambar.
+3.  Screenshot relay nomor 3 merupakan bukti awal yang hanya menampilkan `eth2` dan `eth3`. Gunakan juga screenshot nomor 10 untuk menunjukkan konfigurasi akhir yang mencakup `eth2`, `eth3`, dan `eth4`.
+4.  Pada screenshot nomor 2, layanan DHCPv4 terlihat mulai berjalan, sedangkan DHCPv6 gagal. Pastikan laporan hanya menyatakan DHCPv4 berhasil aktif jika memang itu yang diverifikasi.
 
 > 11. Utahime dan Shoko ditugaskan membangun sistem penamaan domain resmi agar seluruh pos tidak perlu menghafal alamat IP mentah. Konfigurasikan BIND9 pada utahime sebagai DNS Master dan shoko sebagai DNS Slave untuk mengelola domain jujutsu.<xxxx>.com. Atur SOA record, NS delegasi untuk kedua server, dan terapkan allow-transfer dari Master ke Slave. Pastikan file zona berhasil tersinkronisasi otomatis ke shoko saat nomor serial di utahime dinaikkan, lalu buktikan dengan melakukan query dig ke kedua server dari salah satu client.
 
